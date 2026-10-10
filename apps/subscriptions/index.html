@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#4f46e5" />
+    <title>Mis Suscripciones</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Mis Suscripciones</h1>
+        <p class="clock" id="clock"></p>
+      </div>
+      <button class="btn primary" id="add-btn" type="button">+ Añadir</button>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="dashboard" type="button">Resumen</button>
+      <button class="tab" data-view="list" type="button">Suscripciones</button>
+      <button class="tab" data-view="calendar" type="button">Calendario</button>
+      <button class="tab" data-view="settings" type="button">Ajustes</button>
+    </nav>
+
+    <main>
+      <!-- Resumen del mes en curso -->
+      <section class="view active" id="view-dashboard">
+        <div id="reminders"></div>
+        <h2 id="month-title"></h2>
+        <div class="stats">
+          <div class="stat paid">
+            <span class="label">Ya cobrado</span>
+            <strong id="stat-paid"></strong>
+            <small id="stat-paid-count"></small>
+          </div>
+          <div class="stat pending">
+            <span class="label">Pendiente este mes</span>
+            <strong id="stat-pending"></strong>
+            <small id="stat-pending-count"></small>
+          </div>
+          <div class="stat total">
+            <span class="label">Total del mes</span>
+            <strong id="stat-total"></strong>
+            <small id="stat-active"></small>
+          </div>
+          <div class="stat yearly">
+            <span class="label">Gasto anual estimado</span>
+            <strong id="stat-yearly"></strong>
+            <small id="stat-monthly-avg"></small>
+          </div>
+        </div>
+        <div class="progress" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div>
+        <p class="progress-label" id="progress-label"></p>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Cobros de este mes</h3>
+            <ul class="charges" id="month-charges"></ul>
+          </div>
+          <div class="card">
+            <h3>Gasto mensual por categoría</h3>
+            <ul class="categories" id="categories"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Listado de suscripciones -->
+      <section class="view" id="view-list">
+        <div class="toolbar">
+          <input type="search" id="search" placeholder="Buscar suscripción…" />
+          <select id="filter-category"></select>
+          <select id="sort">
+            <option value="next">Próxima renovación</option>
+            <option value="price">Precio mensual</option>
+            <option value="name">Nombre</option>
+          </select>
+        </div>
+        <div class="sub-list" id="sub-list"></div>
+      </section>
+
+      <!-- Calendario mensual -->
+      <section class="view" id="view-calendar">
+        <div class="cal-header">
+          <button class="btn" id="cal-prev" type="button" aria-label="Mes anterior">‹</button>
+          <h2 id="cal-title"></h2>
+          <button class="btn" id="cal-next" type="button" aria-label="Mes siguiente">›</button>
+          <button class="btn" id="cal-today" type="button">Hoy</button>
+        </div>
+        <p class="cal-total" id="cal-total"></p>
+        <div class="calendar" id="calendar"></div>
+        <ul class="charges" id="cal-day-detail"></ul>
+      </section>
+
+      <!-- Ajustes -->
+      <section class="view" id="view-settings">
+        <div class="card">
+          <h3>Moneda</h3>
+          <select id="currency">
+            <option value="EUR">Euro (€)</option>
+            <option value="USD">Dólar ($)</option>
+            <option value="GBP">Libra (£)</option>
+            <option value="MXN">Peso mexicano</option>
+            <option value="ARS">Peso argentino</option>
+            <option value="COP">Peso colombiano</option>
+            <option value="CLP">Peso chileno</option>
+          </select>
+        </div>
+        <div class="card">
+          <h3>Recordatorios</h3>
+          <p>
+            Las notificaciones del navegador avisan mientras la app esté abierta (o instalada en
+            segundo plano). Para avisos garantizados con la app cerrada, exporta tus suscripciones
+            al calendario del móvil: cada una incluye su alarma.
+          </p>
+          <div class="row">
+            <button class="btn" id="notify-btn" type="button">Activar notificaciones</button>
+            <button class="btn" id="ics-btn" type="button">Exportar a calendario (.ics)</button>
+          </div>
+          <p class="muted" id="notify-status"></p>
+        </div>
+        <div class="card">
+          <h3>Copia de seguridad</h3>
+          <p>Tus datos se guardan solo en este dispositivo.</p>
+          <div class="row">
+            <button class="btn" id="export-btn" type="button">Exportar JSON</button>
+            <label class="btn">
+              Importar JSON
+              <input type="file" id="import-input" accept="application/json" hidden />
+            </label>
+            <button class="btn" id="demo-btn" type="button">Cargar ejemplos</button>
+            <button class="btn danger" id="clear-btn" type="button">Borrar todo</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Formulario alta / edición -->
+    <dialog id="sub-dialog">
+      <form id="sub-form" method="dialog">
+        <h2 id="form-title">Nueva suscripción</h2>
+        <input type="hidden" name="id" />
+        <label>Nombre de la plataforma o app
+          <input name="name" required maxlength="60" placeholder="Netflix, Spotify, iCloud…" />
+        </label>
+        <label>¿Qué es? / Descripción
+          <textarea name="description" rows="2" maxlength="300" placeholder="Plan Premium 4K compartido con familia"></textarea>
+        </label>
+        <div class="form-row">
+          <label>Precio
+            <input name="price" type="number" step="0.01" min="0" required />
+          </label>
+          <label>Periodicidad
+            <select name="cycle">
+              <option value="monthly">Mensual</option>
+              <option value="weekly">Semanal</option>
+              <option value="quarterly">Trimestral</option>
+              <option value="semiannual">Semestral</option>
+              <option value="yearly">Anual</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Fecha del primer cobro / renovación
+            <input name="startDate" type="date" required />
+          </label>
+          <label>Avisarme (días antes)
+            <input name="reminderDays" type="number" min="0" max="60" value="3" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Categoría
+            <input name="category" list="category-options" placeholder="Streaming" />
+            <datalist id="category-options"></datalist>
+          </label>
+          <label>Método de pago
+            <input name="paymentMethod" placeholder="Visa ****1234" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Web para gestionar / cancelar
+            <input name="url" type="url" placeholder="https://…" />
+          </label>
+          <label>Color
+            <input name="color" type="color" value="#4f46e5" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Fecha de baja (opcional)
+            <input name="endDate" type="date" />
+          </label>
+          <label class="check">
+            <input name="active" type="checkbox" checked /> Activa
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn danger" id="delete-btn" type="button">Eliminar</button>
+          <span class="spacer"></span>
+          <button class="btn" value="cancel" formnovalidate type="submit">Cancelar</button>
+          <button class="btn primary" value="save" type="submit">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script src="schedule.js"></script>
+    <script src="ics.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
