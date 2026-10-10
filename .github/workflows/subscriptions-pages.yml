@@ -1,0 +1,50 @@
+name: Subscriptions app (GitHub Pages)
+
+# Publishes apps/subscriptions as a static PWA so it can be installed on a phone
+# ("Add to Home Screen"). Requires Settings -> Pages -> Source: "GitHub Actions".
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/subscriptions/**"
+      - ".github/workflows/subscriptions-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: subscriptions-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: node --test apps/subscriptions/schedule.test.mjs
+
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp -r apps/subscriptions/{index.html,styles.css,schedule.js,ics.js,store.js,app.js,sw.js,manifest.webmanifest,icons} _site/
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

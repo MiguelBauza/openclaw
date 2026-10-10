@@ -1,21 +1,26 @@
-// Offline cache (network-first so edits show up immediately) + notification clicks.
-const CACHE = "subs-v1";
-const ASSETS = [
+// Offline support: app shell is precached and served cache-first, then refreshed
+// in the background (stale-while-revalidate) so updates land on the next launch.
+const CACHE = "subs-v2";
+const SHELL = [
   "./",
   "index.html",
   "styles.css",
   "schedule.js",
   "ics.js",
+  "store.js",
   "app.js",
-  "icon.svg",
   "manifest.webmanifest",
+  "icons/icon.svg",
+  "icons/icon-192.png",
+  "icons/icon-512.png",
+  "icons/apple-touch-icon.png",
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.addAll(ASSETS))
+      .then((cache) => cache.addAll(SHELL))
       .then(() => self.skipWaiting()),
   );
 });
@@ -30,17 +35,25 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") {
+  const { request } = event;
+  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) {
     return;
   }
   event.respondWith(
-    fetch(event.request)
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-        return res;
-      })
-      .catch(() => caches.match(event.request)),
+    caches.open(CACHE).then(async (cache) => {
+      // Navigations (incl. ?add / ?view=… shortcuts) share the cached shell.
+      const key = request.mode === "navigate" ? "./" : request;
+      const cached = await cache.match(key, { ignoreSearch: request.mode === "navigate" });
+      const network = fetch(request)
+        .then((res) => {
+          if (res.ok) {
+            cache.put(key, res.clone());
+          }
+          return res;
+        })
+        .catch(() => cached);
+      return cached || network;
+    }),
   );
 });
 
@@ -48,7 +61,7 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(
     self.clients
-      .matchAll({ type: "window" })
+      .matchAll({ type: "window", includeUncontrolled: true })
       .then((list) => (list[0] ? list[0].focus() : self.clients.openWindow("./"))),
   );
 });

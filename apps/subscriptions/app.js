@@ -1,12 +1,9 @@
-// UI layer for the subscription manager. State lives in localStorage; every
-// figure is recomputed from the current date so the app stays up to date.
+// UI layer for the subscription manager. Every figure is recomputed from the
+// current date, so paid/pending totals and renewals stay up to date on their own.
 (function () {
   "use strict";
 
   const S = window.SubSchedule;
-  const STORAGE_KEY = "subs.v1";
-  const SETTINGS_KEY = "subs.settings.v1";
-  const NOTIFIED_KEY = "subs.notified.v1";
   const MONTHS = [
     "enero",
     "febrero",
@@ -21,40 +18,52 @@
     "noviembre",
     "diciembre",
   ];
-  const WEEKDAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  const WEEKDAYS = ["L", "M", "X", "J", "V", "S", "D"];
+  const SWATCHES = [
+    "#ff3b30",
+    "#ff9500",
+    "#ffcc00",
+    "#34c759",
+    "#00c7be",
+    "#30b0c7",
+    "#007aff",
+    "#5856d6",
+    "#af52de",
+    "#ff2d55",
+    "#a2845e",
+    "#8e8e93",
+  ];
+  const NOTIFIED_KEY = "subs.notified.v1";
+  // Embedded in the Claude viewer (no service worker, notifications or .ics there).
+  const EMBEDDED = window.SubStore.hasClaude() || window.self !== window.top;
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-  // ---------- Storage ----------
-  function load(key, fallback) {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
-    } catch {
-      return fallback;
-    }
-  }
-  function save(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      toast("No se pudo guardar en este navegador");
-    }
-  }
+  const store = window.SubStore.createStore({
+    onChange: () => renderAll(),
+    onStatus: (text) => {
+      const node = $("#sync-status");
+      node.textContent = text;
+      node.hidden = !text;
+      if (text) {
+        $("#storage-note").textContent =
+          "Tus suscripciones se guardan en tu cuenta de Claude y solo tú las ves.";
+      }
+    },
+  });
+  const subs = () => store.state.subs;
+  const settings = store.state.settings;
 
-  let subs = load(STORAGE_KEY, []);
-  let settings = Object.assign({ currency: "EUR" }, load(SETTINGS_KEY, {}));
-  let notified = load(NOTIFIED_KEY, {});
-  let calCursor = null; // {year, month} shown in the calendar view
+  let notified = store.load(NOTIFIED_KEY, {});
+  let calCursor = null;
   let selectedDay = null;
   let lastDayKey = "";
 
-  const persist = () => save(STORAGE_KEY, subs);
-
   // ---------- Helpers ----------
-  const now = () => new Date();
-  const today = () => S.startOfDay(now());
+  const today = () => S.startOfDay(new Date());
+  const price = (sub) => Number(sub.price) || 0;
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
   function money(value) {
     try {
@@ -81,10 +90,11 @@
     if (days === 1) {
       return "mañana";
     }
-    if (days === -1) {
-      return "ayer";
-    }
     return days > 0 ? `en ${days} días` : `hace ${-days} días`;
+  }
+
+  function plural(n, one, many) {
+    return `${n} ${n === 1 ? one : many}`;
   }
 
   function el(tag, attrs, children) {
@@ -110,8 +120,15 @@
     return node;
   }
 
-  function dot(color) {
-    return el("span", { class: "dot", style: `background:${color || "#4f46e5"}` });
+  // App-icon style avatar: rounded square, colour gradient, first letter.
+  function avatar(sub, size) {
+    const color = sub.color || "#8e8e93";
+    return el("span", {
+      class: `avatar${size ? ` ${size}` : ""}`,
+      style: `--c:${color}`,
+      text: (sub.name || "?").trim().charAt(0).toUpperCase(),
+      "aria-hidden": "true",
+    });
   }
 
   function uid() {
@@ -126,31 +143,51 @@
     toast.timer = setTimeout(() => t.classList.remove("show"), 2600);
   }
 
-  const activeSubs = () => subs.filter((s) => s.active !== false);
+  // In-page confirmation (the Claude viewer blocks window.confirm).
+  function askConfirm(message, okLabel) {
+    const box = $("#confirm-dialog");
+    $("#confirm-text").textContent = message;
+    $("#confirm-ok").textContent = okLabel || "Aceptar";
+    box.returnValue = "";
+    box.showModal();
+    return new Promise((resolve) => {
+      box.addEventListener("close", () => resolve(box.returnValue === "ok"), { once: true });
+    });
+  }
+
+  const activeSubs = () => subs().filter((s) => s.active !== false);
 
   // ---------- Dashboard ----------
   function renderDashboard() {
     const ref = today();
-    const sum = S.monthSummary(subs, ref);
+    const sum = S.monthSummary(subs(), ref);
     const active = activeSubs();
     const yearly = active.reduce((acc, s) => acc + S.yearlyCost(s), 0);
-
-    $("#month-title").textContent = `${cap(MONTHS[sum.month])} ${sum.year}`;
-    $("#stat-paid").textContent = money(sum.paidTotal);
-    $("#stat-paid-count").textContent = `${sum.paid.length} cobro(s) realizados`;
-    $("#stat-pending").textContent = money(sum.pendingTotal);
-    $("#stat-pending-count").textContent = `${sum.pending.length} cobro(s) por llegar`;
-    $("#stat-total").textContent = money(sum.total);
-    $("#stat-active").textContent = `${active.length} suscripción(es) activas`;
-    $("#stat-yearly").textContent = money(yearly);
-    $("#stat-monthly-avg").textContent = `≈ ${money(yearly / 12)} / mes de media`;
-
     const pct = sum.total > 0 ? Math.round((sum.paidTotal / sum.total) * 100) : 0;
-    $("#progress-bar").style.width = `${pct}%`;
-    $("#progress-label").textContent =
-      sum.total > 0
-        ? `Llevas cobrado el ${pct}% del gasto de este mes · día ${ref.getDate()} de ${S.daysInMonth(sum.year, sum.month)}`
-        : "No hay cobros previstos este mes.";
+
+    $("#empty-state").hidden = subs().length > 0;
+    $("#month-title").textContent = `${cap(MONTHS[sum.month])} ${sum.year}`;
+    $("#stat-pending").textContent = money(sum.pendingTotal);
+    $("#stat-pending-count").textContent = sum.pending.length
+      ? `${plural(sum.pending.length, "cobro", "cobros")} por llegar este mes`
+      : "No te queda nada por pagar este mes";
+    $("#stat-paid").textContent = money(sum.paidTotal);
+    $("#stat-paid-count").textContent = plural(sum.paid.length, "cobro", "cobros");
+    $("#stat-total").textContent = money(sum.total);
+    $("#month-progress").textContent =
+      `Día ${ref.getDate()} de ${S.daysInMonth(sum.year, sum.month)}`;
+    $("#stat-yearly").textContent = money(yearly);
+    $("#stat-monthly-avg").textContent = money(yearly / 12);
+    $("#stat-active").textContent = String(active.length);
+
+    // Ring: circumference of r=50 is 2πr.
+    const circ = 2 * Math.PI * 50;
+    const ring = $("#ring-value");
+    ring.style.strokeDasharray = `${circ}`;
+    ring.style.strokeDashoffset = `${circ * (1 - pct / 100)}`;
+    ring.classList.toggle("zero", pct === 0);
+    $("#ring-pct").textContent = `${pct}%`;
+    $("#ring").setAttribute("aria-label", `Cobrado el ${pct}% del gasto del mes`);
 
     const list = $("#month-charges");
     list.replaceChildren();
@@ -168,40 +205,50 @@
   function chargeItem(c, ref) {
     const days = S.daysBetween(ref, c.date);
     const status = c.paid
-      ? el("span", { class: "badge ok", text: days === 0 ? "Cobrado hoy" : "Cobrado" })
-      : el("span", { class: "badge wait", text: relDays(days) });
-    return el("li", { class: c.paid ? "paid" : "", onclick: () => openForm(c.sub) }, [
-      dot(c.sub.color),
+      ? el("span", { class: "pill paid", text: days === 0 ? "Cobrado hoy" : "Cobrado" })
+      : el("span", {
+          class: `pill ${days <= (c.sub.reminderDays ?? 3) ? "soon" : "wait"}`,
+          text: cap(relDays(days)),
+        });
+    return el("li", { class: `row-item tappable${c.paid ? " is-paid" : ""}` }, [
+      avatar(c.sub),
       el("div", { class: "grow" }, [
         el("strong", { text: c.sub.name }),
-        el("small", { text: fmtDate(c.date) }),
+        el("small", {
+          text: cap(fmtDate(c.date, { weekday: "long", day: "numeric", month: "long" })),
+        }),
       ]),
-      el("span", { class: "amount", text: money(c.amount) }),
-      status,
+      el("div", { class: "trail" }, [
+        el("span", { class: "amount", text: money(c.amount) }),
+        status,
+      ]),
     ]);
   }
 
   function renderReminders(ref) {
     const box = $("#reminders");
     box.replaceChildren();
-    const due = S.dueReminders(subs, ref);
+    const due = S.dueReminders(subs(), ref);
     if (!due.length) {
       return;
     }
-    const items = due.map((r) =>
-      el("li", {}, [
-        dot(r.sub.color),
-        el("span", {
-          class: "grow",
-          text: `${r.sub.name} se renueva ${relDays(r.days)} (${fmtDate(r.date)})`,
-        }),
-        el("strong", { text: money(Number(r.sub.price) || 0) }),
-      ]),
-    );
     box.append(
-      el("div", { class: "reminder-box" }, [
-        el("h3", { text: "🔔 Próximas renovaciones" }),
-        el("ul", {}, items),
+      el("section", { class: "reminder-card", "aria-label": "Próximas renovaciones" }, [
+        el("p", { class: "eyebrow", text: "Próximas renovaciones" }),
+        el(
+          "ul",
+          {},
+          due.map((r) =>
+            el("li", {}, [
+              avatar(r.sub, "sm"),
+              el("span", { class: "grow" }, [
+                el("strong", { text: r.sub.name }),
+                ` se renueva ${relDays(r.days)}`,
+              ]),
+              el("span", { class: "amount", text: money(price(r.sub)) }),
+            ]),
+          ),
+        ),
       ]),
     );
   }
@@ -210,27 +257,29 @@
     const totals = new Map();
     for (const s of active) {
       const key = s.category || "Sin categoría";
-      totals.set(key, (totals.get(key) || 0) + S.monthlyEquivalent(s));
+      const entry = totals.get(key) || { value: 0, color: s.color || "#8e8e93" };
+      entry.value += S.monthlyEquivalent(s);
+      totals.set(key, entry);
     }
-    const rows = [...totals.entries()].toSorted((a, b) => b[1] - a[1]);
-    const max = rows.length ? rows[0][1] : 0;
+    const rows = [...totals.entries()].toSorted((a, b) => b[1].value - a[1].value);
+    const total = rows.reduce((acc, [, e]) => acc + e.value, 0);
+    $("#category-bar").replaceChildren(
+      ...rows.map(([name, e]) =>
+        el("span", { style: `flex:${e.value} 1 0;--c:${e.color}`, title: name }),
+      ),
+    );
     const list = $("#categories");
     list.replaceChildren();
     if (!rows.length) {
       list.append(el("li", { class: "empty", text: "Añade suscripciones para ver el reparto." }));
     }
-    for (const [name, value] of rows) {
+    for (const [name, e] of rows) {
       list.append(
         el("li", {}, [
-          el("div", { class: "cat-row" }, [
-            el("span", { text: name }),
-            el("strong", { text: money(value) }),
-          ]),
-          el(
-            "div",
-            { class: "bar" },
-            el("div", { style: `width:${max ? (value / max) * 100 : 0}%` }),
-          ),
+          el("span", { class: "legend", style: `--c:${e.color}` }),
+          el("span", { class: "grow", text: name }),
+          el("span", { class: "muted pct", text: `${Math.round((e.value / total) * 100)}%` }),
+          el("strong", { class: "amount", text: money(e.value) }),
         ]),
       );
     }
@@ -242,22 +291,23 @@
     const q = $("#search").value.trim().toLowerCase();
     const cat = $("#filter-category").value;
     const sort = $("#sort").value;
-    let rows = subs.filter((s) => {
-      const hay = `${s.name} ${s.description || ""} ${s.category || ""}`.toLowerCase();
-      return (!q || hay.includes(q)) && (!cat || (s.category || "") === cat);
-    });
     const next = (s) => S.nextCharge(s, ref);
-    rows.sort((a, b) => {
-      if (sort === "name") {
-        return a.name.localeCompare(b.name);
-      }
-      if (sort === "price") {
-        return S.monthlyEquivalent(b) - S.monthlyEquivalent(a);
-      }
-      const na = next(a);
-      const nb = next(b);
-      return (na ? na.getTime() : Infinity) - (nb ? nb.getTime() : Infinity);
-    });
+    const rows = subs()
+      .filter((s) => {
+        const hay = `${s.name} ${s.description || ""} ${s.category || ""}`.toLowerCase();
+        return (!q || hay.includes(q)) && (!cat || (s.category || "") === cat);
+      })
+      .toSorted((a, b) => {
+        if (sort === "name") {
+          return a.name.localeCompare(b.name);
+        }
+        if (sort === "price") {
+          return S.monthlyEquivalent(b) - S.monthlyEquivalent(a);
+        }
+        const na = next(a);
+        const nb = next(b);
+        return (na ? na.getTime() : Infinity) - (nb ? nb.getTime() : Infinity);
+      });
 
     const box = $("#sub-list");
     box.replaceChildren();
@@ -265,9 +315,9 @@
       box.append(
         el("p", {
           class: "empty",
-          text: subs.length
-            ? "Nada coincide con el filtro."
-            : "Aún no tienes suscripciones. Pulsa «+ Añadir» o carga los ejemplos en Ajustes.",
+          text: subs().length
+            ? "Nada coincide con la búsqueda."
+            : "Aún no tienes suscripciones. Pulsa + para añadir la primera.",
         }),
       );
       return;
@@ -283,14 +333,11 @@
     const cycle = S.CYCLES[s.cycle] || S.CYCLES.monthly;
     const inactive = s.active === false || !next;
     const days = next ? S.daysBetween(ref, next) : null;
+    const start = S.parseISO(s.startDate);
     const meta = [
-      ["Precio", `${money(Number(s.price) || 0)} · ${cycle.label}`],
-      ["Equivale a", `${money(S.monthlyEquivalent(s))} / mes · ${money(S.yearlyCost(s))} / año`],
       [
-        "Próxima renovación",
-        next
-          ? `${fmtDate(next, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} (${relDays(days)})`
-          : "—",
+        "Próximo cobro",
+        next ? cap(fmtDate(next, { weekday: "long", day: "numeric", month: "long" })) : "—",
       ],
       [
         "Último cobro",
@@ -299,43 +346,59 @@
       [
         "Día de cobro",
         cycle.months === 0
-          ? `cada ${fmtDate(S.parseISO(s.startDate), { weekday: "long" })}`
-          : `día ${S.parseISO(s.startDate).getDate()}`,
+          ? `Cada ${fmtDate(start, { weekday: "long" })}`
+          : `Día ${start.getDate()}`,
       ],
+      ["Al mes / al año", `${money(S.monthlyEquivalent(s))} · ${money(S.yearlyCost(s))}`],
       s.paymentMethod ? ["Pago", s.paymentMethod] : null,
-      ["Aviso", `${s.reminderDays ?? 3} día(s) antes`],
+      ["Aviso", `${plural(s.reminderDays ?? 3, "día", "días")} antes`],
     ].filter(Boolean);
+
+    let status;
+    if (s.active === false) {
+      status = el("span", { class: "pill off", text: "Pausada" });
+    } else if (!next) {
+      status = el("span", { class: "pill off", text: "Dada de baja" });
+    } else {
+      status = el("span", {
+        class: `pill ${days <= (s.reminderDays ?? 3) ? "soon" : "wait"}`,
+        text: cap(relDays(days)),
+      });
+    }
 
     return el(
       "article",
-      {
-        class: `sub-card${inactive ? " inactive" : ""}`,
-        style: `--accent:${s.color || "#4f46e5"}`,
-      },
+      { class: `sub-card${inactive ? " inactive" : ""}`, style: `--c:${s.color || "#8e8e93"}` },
       [
         el("header", {}, [
+          avatar(s, "lg"),
           el("div", { class: "grow" }, [
             el("h3", { text: s.name }),
-            el("p", { class: "muted", text: s.description || "Sin descripción" }),
+            el("p", { class: "muted", text: s.description || s.category || "Sin descripción" }),
           ]),
-          el("span", { class: "chip", text: s.category || "Sin categoría" }),
+        ]),
+        el("div", { class: "price-row" }, [
+          el("p", { class: "price" }, [
+            money(price(s)),
+            el("span", { text: ` / ${cycle.label.toLowerCase()}` }),
+          ]),
+          status,
         ]),
         el(
           "dl",
           {},
           meta.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]),
         ),
-        inactive
-          ? el("p", { class: "badge off", text: s.active === false ? "Pausada" : "Dada de baja" })
-          : null,
         el("footer", {}, [
+          s.category ? el("span", { class: "chip", text: s.category }) : null,
+          el("span", { class: "grow" }),
           s.url && /^https?:\/\//i.test(s.url)
             ? el("a", {
-                class: "btn small",
+                class: "btn small ghost",
                 href: s.url,
                 target: "_blank",
                 rel: "noopener",
-                text: "Gestionar ↗",
+                text: "Gestionar",
               })
             : null,
           el("button", {
@@ -350,7 +413,13 @@
   }
 
   function renderCategoryOptions() {
-    const cats = [...new Set(subs.map((s) => s.category).filter(Boolean))].toSorted();
+    const cats = [
+      ...new Set(
+        subs()
+          .map((s) => s.category)
+          .filter(Boolean),
+      ),
+    ].toSorted();
     const sel = $("#filter-category");
     const current = sel.value;
     sel.replaceChildren(
@@ -385,15 +454,15 @@
 
     const byDay = new Map();
     let total = 0;
-    for (const s of subs) {
+    for (const s of subs()) {
       for (const d of S.chargesInMonth(s, year, month)) {
         const list = byDay.get(d.getDate()) || [];
-        list.push({ sub: s, date: d, amount: Number(s.price) || 0, paid: d <= ref });
+        list.push({ sub: s, date: d, amount: price(s), paid: d <= ref });
         byDay.set(d.getDate(), list);
-        total += Number(s.price) || 0;
+        total += price(s);
       }
     }
-    $("#cal-total").textContent = `Total del mes: ${money(total)}`;
+    $("#cal-total").textContent = `${money(total)} en total`;
 
     const grid = $("#calendar");
     grid.replaceChildren(...WEEKDAYS.map((w) => el("div", { class: "wd", text: w })));
@@ -414,15 +483,13 @@
       if (selectedDay === d) {
         classes.push("selected");
       }
-      if (charges.length) {
-        classes.push("has");
-      }
       grid.append(
         el(
           "button",
           {
             class: classes.join(" "),
             type: "button",
+            "aria-label": `${d} de ${MONTHS[month]}${charges.length ? `, ${plural(charges.length, "cobro", "cobros")}` : ""}`,
             onclick: () => {
               selectedDay = d;
               renderCalendar();
@@ -433,14 +500,8 @@
             el(
               "span",
               { class: "dots" },
-              charges.slice(0, 4).map((c) => dot(c.sub.color)),
+              charges.slice(0, 3).map((c) => el("i", { style: `--c:${c.sub.color || "#8e8e93"}` })),
             ),
-            charges.length
-              ? el("span", {
-                  class: "day-sum",
-                  text: money(charges.reduce((a, c) => a + c.amount, 0)),
-                })
-              : null,
           ],
         ),
       );
@@ -448,18 +509,46 @@
 
     const detail = $("#cal-day-detail");
     detail.replaceChildren();
-    if (selectedDay && byDay.has(selectedDay)) {
-      for (const c of byDay.get(selectedDay)) {
+    if (selectedDay) {
+      const date = new Date(year, month, selectedDay);
+      $("#cal-day-title").textContent = cap(
+        fmtDate(date, { weekday: "long", day: "numeric", month: "long" }),
+      );
+      const charges = byDay.get(selectedDay) || [];
+      if (!charges.length) {
+        detail.append(el("li", { class: "empty", text: "Sin cobros este día." }));
+      }
+      for (const c of charges) {
         detail.append(chargeItem(c, ref));
       }
-    } else if (selectedDay) {
-      detail.append(el("li", { class: "empty", text: "Sin cobros este día." }));
+    } else {
+      $("#cal-day-title").textContent = "Toca un día para ver sus cobros";
     }
   }
 
   // ---------- Form ----------
   const dialog = $("#sub-dialog");
   const form = $("#sub-form");
+  const field = (n) => form.elements.namedItem(n);
+
+  function renderSwatches(selected) {
+    $("#swatches").replaceChildren(
+      ...SWATCHES.map((c) =>
+        el("button", {
+          type: "button",
+          class: `swatch${c === selected ? " on" : ""}`,
+          style: `--c:${c}`,
+          role: "radio",
+          "aria-checked": String(c === selected),
+          "aria-label": c,
+          onclick: () => {
+            field("color").value = c;
+            renderSwatches(c);
+          },
+        }),
+      ),
+    );
+  }
 
   function openForm(sub) {
     form.reset();
@@ -467,20 +556,21 @@
       startDate: S.toISO(today()),
       reminderDays: 3,
       cycle: "monthly",
-      color: "#4f46e5",
+      color: SWATCHES[subs().length % SWATCHES.length],
       active: true,
     };
-    for (const field of form.elements) {
-      if (!field.name) {
+    for (const input of form.elements) {
+      if (!input.name) {
         continue;
       }
-      if (field.type === "checkbox") {
-        field.checked = data[field.name] !== false;
+      if (input.type === "checkbox") {
+        input.checked = data[input.name] !== false;
       } else {
-        field.value = data[field.name] ?? field.defaultValue ?? "";
+        input.value = data[input.name] ?? input.defaultValue ?? "";
       }
     }
-    $("#form-title").textContent = sub ? `Editar ${sub.name}` : "Nueva suscripción";
+    renderSwatches(field("color").value);
+    $("#form-title").textContent = sub ? "Editar" : "Nueva suscripción";
     $("#delete-btn").hidden = !sub;
     dialog.showModal();
   }
@@ -489,59 +579,55 @@
     if (ev.submitter && ev.submitter.value !== "save") {
       return;
     }
-    // namedItem() avoids clashes with built-in properties (e.g. a field called "name").
-    const f = (n) => form.elements.namedItem(n);
-    const text = (n) => f(n).value.trim();
+    const text = (n) => field(n).value.trim();
     const sub = {
-      id: f("id").value || uid(),
+      id: field("id").value || uid(),
       name: text("name"),
       description: text("description"),
-      price: Math.max(0, parseFloat(f("price").value) || 0),
-      cycle: f("cycle").value,
-      startDate: f("startDate").value,
-      reminderDays: Math.max(0, parseInt(f("reminderDays").value, 10) || 0),
+      price: Math.max(0, parseFloat(field("price").value) || 0),
+      cycle: field("cycle").value,
+      startDate: field("startDate").value,
+      reminderDays: Math.max(0, parseInt(field("reminderDays").value, 10) || 0),
       category: text("category"),
       paymentMethod: text("paymentMethod"),
       url: text("url"),
-      color: f("color").value,
-      endDate: f("endDate").value || "",
-      active: f("active").checked,
+      color: field("color").value || "#8e8e93",
+      endDate: field("endDate").value || "",
+      active: field("active").checked,
     };
-    const idx = subs.findIndex((s) => s.id === sub.id);
-    if (idx >= 0) {
-      subs[idx] = sub;
-    } else {
-      subs.push(sub);
-    }
-    persist();
+    const added = store.saveSub(sub);
     renderAll();
-    toast(idx >= 0 ? "Suscripción actualizada" : "Suscripción añadida");
+    toast(added ? "Suscripción añadida" : "Cambios guardados");
   });
 
-  $("#delete-btn").addEventListener("click", () => {
-    const id = form.elements.namedItem("id").value;
-    const sub = subs.find((s) => s.id === id);
-    if (!sub || !confirm(`¿Eliminar ${sub.name}?`)) {
+  $("#delete-btn").addEventListener("click", async () => {
+    const id = field("id").value;
+    const sub = subs().find((s) => s.id === id);
+    dialog.close();
+    if (!sub || !(await askConfirm(`¿Eliminar ${sub.name}?`, "Eliminar"))) {
       return;
     }
-    subs = subs.filter((s) => s.id !== id);
-    persist();
-    dialog.close();
+    store.deleteSub(id);
     renderAll();
     toast("Suscripción eliminada");
   });
 
-  // ---------- Notifications ----------
+  // ---------- Notifications (installed app only) ----------
   function updateNotifyStatus() {
     const status = $("#notify-status");
+    const btn = $("#notify-btn");
     if (!("Notification" in window)) {
-      status.textContent = "Este navegador no soporta notificaciones.";
+      status.textContent = "No disponibles en este navegador";
+      btn.hidden = true;
     } else if (Notification.permission === "granted") {
-      status.textContent = "✅ Notificaciones activadas.";
+      status.textContent = "Activadas";
+      btn.hidden = true;
     } else if (Notification.permission === "denied") {
-      status.textContent = "Notificaciones bloqueadas en el navegador.";
+      status.textContent = "Bloqueadas en los ajustes del navegador";
+      btn.hidden = true;
     } else {
-      status.textContent = "Notificaciones desactivadas.";
+      status.textContent = "Te avisan de cada renovación";
+      btn.hidden = false;
     }
   }
 
@@ -550,23 +636,28 @@
       const reg =
         "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
       if (reg) {
-        await reg.showNotification(title, { body, icon: "icon.svg", tag: title });
+        await reg.showNotification(title, {
+          body,
+          icon: "icons/icon-192.png",
+          badge: "icons/icon-192.png",
+          tag: title,
+        });
       } else {
-        new Notification(title, { body, icon: "icon.svg" });
+        new Notification(title, { body, icon: "icons/icon-192.png" });
       }
     } catch {
-      /* ignore: some browsers only allow notifications from a SW */
+      /* some browsers only allow notifications from a service worker */
     }
   }
 
-  // Fires one notification per (subscription, renewal date) inside its reminder window.
+  // One notification per (subscription, renewal date) inside its reminder window.
   function checkNotifications() {
-    if (!("Notification" in window) || Notification.permission !== "granted") {
+    if (EMBEDDED || !("Notification" in window) || Notification.permission !== "granted") {
       return;
     }
     const ref = today();
     let changed = false;
-    for (const r of S.dueReminders(subs, ref)) {
+    for (const r of S.dueReminders(subs(), ref)) {
       const key = `${r.sub.id}:${S.toISO(r.date)}`;
       if (notified[key]) {
         continue;
@@ -574,11 +665,10 @@
       notified[key] = S.toISO(ref);
       changed = true;
       showNotification(
-        `Renovación de ${r.sub.name} ${relDays(r.days)}`,
-        `${money(Number(r.sub.price) || 0)} · ${fmtDate(r.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        `${r.sub.name} se renueva ${relDays(r.days)}`,
+        `${money(price(r.sub))} · ${fmtDate(r.date, { weekday: "long", day: "numeric", month: "long" })}`,
       );
     }
-    // Drop keys for renewals that already passed.
     for (const key of Object.keys(notified)) {
       if (key.split(":")[1] < S.toISO(ref)) {
         delete notified[key];
@@ -586,40 +676,74 @@
       }
     }
     if (changed) {
-      save(NOTIFIED_KEY, notified);
+      store.save(NOTIFIED_KEY, notified);
     }
   }
 
   $("#notify-btn").addEventListener("click", async () => {
-    if (!("Notification" in window)) {
-      return toast("Notificaciones no disponibles");
-    }
     await Notification.requestPermission();
     updateNotifyStatus();
     checkNotifications();
   });
 
+  // ---------- Install (PWA) ----------
+  let installPrompt = null;
+  function setupInstall() {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true;
+    if (EMBEDDED || standalone) {
+      return;
+    }
+    const isIOS =
+      /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      $("#install-help").textContent =
+        "En Safari, pulsa Compartir y luego «Añadir a pantalla de inicio».";
+      $("#install-group").hidden = false;
+    }
+    window.addEventListener("beforeinstallprompt", (ev) => {
+      ev.preventDefault();
+      installPrompt = ev;
+      $("#install-group").hidden = false;
+      $("#install-btn").hidden = false;
+    });
+    $("#install-btn").addEventListener("click", async () => {
+      if (!installPrompt) {
+        return;
+      }
+      installPrompt.prompt();
+      await installPrompt.userChoice;
+      installPrompt = null;
+      $("#install-group").hidden = true;
+    });
+  }
+
   // ---------- Import / export ----------
-  function download(name, content, type) {
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    const a = el("a", { href: url, download: name });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  async function offerDownload(name, content, type) {
+    try {
+      if (await store.download(name, content, type)) {
+        toast("Archivo listo");
+      }
+    } catch (err) {
+      if (!err || err.code !== "declined") {
+        toast("No se pudo guardar el archivo");
+      }
+    }
   }
 
   $("#ics-btn").addEventListener("click", () => {
     if (!activeSubs().length) {
       return toast("No hay suscripciones activas");
     }
-    download("suscripciones.ics", window.SubIcs.buildIcs(subs, settings), "text/calendar");
+    offerDownload("suscripciones.ics", window.SubIcs.buildIcs(subs(), settings), "text/calendar");
   });
 
   $("#export-btn").addEventListener("click", () => {
-    download(
+    offerDownload(
       `suscripciones-${S.toISO(today())}.json`,
-      JSON.stringify({ version: 1, settings, subs }, null, 2),
+      JSON.stringify({ version: 1, settings, subs: subs() }, null, 2),
       "application/json",
     );
   });
@@ -636,31 +760,33 @@
       if (!Array.isArray(list)) {
         throw new Error("formato");
       }
-      subs = list
+      const clean = list
         .filter((s) => s && s.name && s.startDate)
         .map((s) => Object.assign({ id: uid() }, s));
-      if (data.settings) {
-        settings = Object.assign(settings, data.settings);
+      if (data.settings && data.settings.currency) {
+        store.saveSettings({ currency: data.settings.currency });
       }
-      persist();
-      save(SETTINGS_KEY, settings);
+      store.replaceAll(clean);
       renderAll();
-      toast(`${subs.length} suscripción(es) importadas`);
+      toast(`${plural(clean.length, "suscripción importada", "suscripciones importadas")}`);
     } catch {
-      toast("Archivo no válido");
+      toast("Ese archivo no es una copia válida");
     }
   });
 
-  $("#demo-btn").addEventListener("click", () => {
-    if (subs.length && !confirm("Se añadirán ejemplos a tus suscripciones. ¿Continuar?")) {
+  async function loadDemo() {
+    if (
+      subs().length &&
+      !(await askConfirm("Se añadirán cinco ejemplos a tus suscripciones.", "Añadir"))
+    ) {
       return;
     }
     const ref = today();
     const day = (d, monthsBack) =>
       S.toISO(new Date(ref.getFullYear(), ref.getMonth() - (monthsBack || 1), d));
-    subs.push(
+    const base = { active: true, endDate: "", paymentMethod: "" };
+    [
       {
-        id: uid(),
         name: "Netflix",
         description: "Plan Estándar sin anuncios",
         price: 13.99,
@@ -668,12 +794,10 @@
         startDate: day(5),
         reminderDays: 2,
         category: "Streaming",
-        color: "#e50914",
-        active: true,
+        color: "#ff3b30",
         url: "https://www.netflix.com/account",
       },
       {
-        id: uid(),
         name: "Spotify",
         description: "Premium Familiar",
         price: 17.99,
@@ -681,12 +805,10 @@
         startDate: day(12),
         reminderDays: 2,
         category: "Música",
-        color: "#1db954",
-        active: true,
+        color: "#34c759",
         url: "https://www.spotify.com/account",
       },
       {
-        id: uid(),
         name: "iCloud+",
         description: "200 GB de almacenamiento",
         price: 2.99,
@@ -694,60 +816,60 @@
         startDate: day(20),
         reminderDays: 1,
         category: "Nube",
-        color: "#3b82f6",
-        active: true,
+        color: "#007aff",
       },
       {
-        id: uid(),
         name: "Amazon Prime",
-        description: "Envíos gratis + Prime Video",
+        description: "Envíos gratis y Prime Video",
         price: 49.9,
         cycle: "yearly",
         startDate: day(Math.min(28, ref.getDate() + 6), 12),
         reminderDays: 7,
         category: "Streaming",
-        color: "#ff9900",
-        active: true,
+        color: "#ff9500",
       },
       {
-        id: uid(),
         name: "Gimnasio",
         description: "Cuota mensual",
         price: 34.9,
         cycle: "monthly",
         startDate: day(1),
         reminderDays: 3,
-        category: "Gimnasio",
-        color: "#a855f7",
-        active: true,
+        category: "Deporte",
+        color: "#af52de",
       },
-    );
-    persist();
+    ].forEach((s) => store.saveSub(Object.assign({ id: uid() }, base, s)));
     renderAll();
-    toast("Ejemplos cargados");
-  });
+    toast("Ejemplos añadidos: edítalos o bórralos cuando quieras");
+  }
+  $("#demo-btn").addEventListener("click", loadDemo);
+  $("#empty-demo").addEventListener("click", loadDemo);
+  $("#empty-add").addEventListener("click", () => openForm(null));
 
-  $("#clear-btn").addEventListener("click", () => {
-    if (!confirm("¿Borrar todas las suscripciones? Esta acción no se puede deshacer.")) {
+  $("#clear-btn").addEventListener("click", async () => {
+    if (
+      !(await askConfirm("¿Borrar todas las suscripciones? No se puede deshacer.", "Borrar todo"))
+    ) {
       return;
     }
-    subs = [];
     notified = {};
-    persist();
-    save(NOTIFIED_KEY, notified);
+    store.save(NOTIFIED_KEY, notified);
+    store.replaceAll([]);
     renderAll();
   });
 
   $("#currency").addEventListener("change", (ev) => {
-    settings.currency = ev.target.value;
-    save(SETTINGS_KEY, settings);
+    store.saveSettings({ currency: ev.target.value });
     renderAll();
   });
 
   // ---------- Navigation ----------
   function showView(name) {
+    const view = $(`#view-${name}`);
     $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
-    $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
+    $$(".view").forEach((v) => v.classList.toggle("active", v === view));
+    $("#page-title").textContent = view.dataset.title;
+    window.scrollTo({ top: 0 });
     try {
       sessionStorage.setItem("subs.view", name);
     } catch {
@@ -774,49 +896,40 @@
   });
 
   // ---------- Real-time refresh ----------
-  function cap(s) {
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-
   function renderClock() {
-    const d = now();
-    $("#clock").textContent =
-      cap(
-        d.toLocaleDateString("es-ES", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        }),
-      ) +
-      " · " +
-      d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    $("#today-label").textContent = new Date()
+      .toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })
+      .toUpperCase();
   }
 
   function renderAll() {
     $("#currency").value = settings.currency;
+    $("#export-row").hidden = !store.canDownload();
+    renderClock();
     renderCategoryOptions();
     renderDashboard();
     renderList();
     renderCalendar();
-    updateNotifyStatus();
-    checkNotifications();
+    if (!EMBEDDED) {
+      updateNotifyStatus();
+      checkNotifications();
+    }
     lastDayKey = S.toISO(today());
   }
 
-  // Ticks every 20s; when the day changes everything (paid/pending split,
+  // Ticks every 20 s; when the day changes everything (paid/pending split,
   // next renewals, reminders) is recalculated automatically.
   function tick() {
-    renderClock();
-    if (S.toISO(today()) !== lastDayKey) {
-      if (calCursor && lastDayKey) {
-        const prev = S.parseISO(lastDayKey);
-        if (calCursor.year === prev.getFullYear() && calCursor.month === prev.getMonth()) {
-          calCursor = null;
-        }
-      }
-      renderAll();
+    if (S.toISO(today()) === lastDayKey) {
+      return;
     }
+    if (calCursor && lastDayKey) {
+      const prev = S.parseISO(lastDayKey);
+      if (calCursor.year === prev.getFullYear() && calCursor.month === prev.getMonth()) {
+        calCursor = null;
+      }
+    }
+    renderAll();
   }
 
   document.addEventListener("visibilitychange", () => {
@@ -825,25 +938,33 @@
     }
   });
   window.addEventListener("storage", (ev) => {
-    if (ev.key === STORAGE_KEY) {
-      subs = load(STORAGE_KEY, []);
+    if (ev.key === "subs.v1") {
+      store.state.subs = store.load("subs.v1", []);
       renderAll();
     }
   });
 
-  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  if (EMBEDDED) {
+    $$("[data-pwa]").forEach((node) => node.remove());
+  } else if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
+  setupInstall();
 
+  // Home-screen shortcut "Añadir suscripción" opens ./?add
+  const params = new URLSearchParams(location.search);
   try {
-    const view = sessionStorage.getItem("subs.view");
+    const view = params.get("view") || sessionStorage.getItem("subs.view");
     if (view && $(`#view-${view}`)) {
       showView(view);
     }
   } catch {
     /* ignore */
   }
-  renderClock();
   renderAll();
+  if (params.has("add")) {
+    openForm(null);
+  }
+  store.connect().catch(() => {});
   setInterval(tick, 20_000);
 })();

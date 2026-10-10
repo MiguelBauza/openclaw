@@ -3,211 +3,347 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#4f46e5" />
     <title>Mis Suscripciones</title>
+    <meta name="description" content="Controla tus suscripciones, renovaciones y gasto mensual." />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Suscripciones" />
+    <meta name="format-detection" content="telephone=no" />
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <h1>Mis Suscripciones</h1>
-        <p class="clock" id="clock"></p>
-      </div>
-      <button class="btn primary" id="add-btn" type="button">+ Añadir</button>
-    </header>
+    <!-- PAGE-START (everything up to PAGE-END is also used for the Claude artifact build) -->
+    <div class="backdrop" aria-hidden="true"></div>
 
-    <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="dashboard" type="button">Resumen</button>
-      <button class="tab" data-view="list" type="button">Suscripciones</button>
-      <button class="tab" data-view="calendar" type="button">Calendario</button>
-      <button class="tab" data-view="settings" type="button">Ajustes</button>
-    </nav>
+    <header class="appbar">
+      <div class="appbar-text">
+        <p class="eyebrow" id="today-label"></p>
+        <h1 id="page-title">Resumen</h1>
+      </div>
+      <button class="icon-btn primary" id="add-btn" type="button" aria-label="Añadir suscripción">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    </header>
+    <p class="sync" id="sync-status" hidden></p>
 
     <main>
       <!-- Resumen del mes en curso -->
-      <section class="view active" id="view-dashboard">
-        <div id="reminders"></div>
-        <h2 id="month-title"></h2>
-        <div class="stats">
-          <div class="stat paid">
-            <span class="label">Ya cobrado</span>
-            <strong id="stat-paid"></strong>
-            <small id="stat-paid-count"></small>
-          </div>
-          <div class="stat pending">
-            <span class="label">Pendiente este mes</span>
-            <strong id="stat-pending"></strong>
-            <small id="stat-pending-count"></small>
-          </div>
-          <div class="stat total">
-            <span class="label">Total del mes</span>
-            <strong id="stat-total"></strong>
-            <small id="stat-active"></small>
-          </div>
-          <div class="stat yearly">
-            <span class="label">Gasto anual estimado</span>
-            <strong id="stat-yearly"></strong>
-            <small id="stat-monthly-avg"></small>
+      <section class="view active" id="view-dashboard" data-title="Resumen">
+        <div class="card empty-state" id="empty-state" hidden>
+          <div class="empty-art" aria-hidden="true"><span></span><span></span><span></span></div>
+          <h2>Empieza con tu primera suscripción</h2>
+          <p>Añade su precio y su día de cobro, o carga cinco ejemplos para ver cómo funciona. Podrás editarlos o borrarlos después.</p>
+          <div class="row center">
+            <button class="btn primary" id="empty-add" type="button">Añadir suscripción</button>
+            <button class="btn" id="empty-demo" type="button">Ver con ejemplos</button>
           </div>
         </div>
-        <div class="progress" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div>
-        <p class="progress-label" id="progress-label"></p>
 
-        <div class="grid-2">
-          <div class="card">
-            <h3>Cobros de este mes</h3>
-            <ul class="charges" id="month-charges"></ul>
+        <div id="reminders"></div>
+
+        <section class="hero" aria-labelledby="month-title">
+          <div class="hero-main">
+            <p class="eyebrow" id="month-title"></p>
+            <p class="hero-label">Te queda por pagar</p>
+            <p class="hero-amount" id="stat-pending"></p>
+            <p class="hero-sub" id="stat-pending-count"></p>
           </div>
+          <div class="ring" role="img" id="ring" aria-label="">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <defs>
+                <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="var(--paid-a)" />
+                  <stop offset="1" stop-color="var(--paid-b)" />
+                </linearGradient>
+              </defs>
+              <circle class="ring-track" cx="60" cy="60" r="50" />
+              <circle class="ring-value" id="ring-value" cx="60" cy="60" r="50" stroke="url(#ring-grad)" />
+            </svg>
+            <div class="ring-center">
+              <strong id="ring-pct"></strong>
+              <span>cobrado</span>
+            </div>
+          </div>
+          <div class="hero-split">
+            <div>
+              <span class="legend paid"></span>
+              <span class="hero-split-label">Ya cobrado</span>
+              <strong id="stat-paid"></strong>
+              <small id="stat-paid-count"></small>
+            </div>
+            <div>
+              <span class="legend total"></span>
+              <span class="hero-split-label">Total del mes</span>
+              <strong id="stat-total"></strong>
+              <small id="month-progress"></small>
+            </div>
+          </div>
+        </section>
+
+        <div class="tiles">
+          <div class="tile">
+            <span class="tile-label">Al año</span>
+            <strong id="stat-yearly"></strong>
+          </div>
+          <div class="tile">
+            <span class="tile-label">Media al mes</span>
+            <strong id="stat-monthly-avg"></strong>
+          </div>
+          <div class="tile">
+            <span class="tile-label">Activas</span>
+            <strong id="stat-active"></strong>
+          </div>
+        </div>
+
+        <section class="group">
+          <h2 class="group-title">Cobros de este mes</h2>
+          <ul class="list" id="month-charges"></ul>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title">Gasto mensual por categoría</h2>
           <div class="card">
-            <h3>Gasto mensual por categoría</h3>
+            <div class="stack-bar" id="category-bar"></div>
             <ul class="categories" id="categories"></ul>
           </div>
-        </div>
+        </section>
       </section>
 
       <!-- Listado de suscripciones -->
-      <section class="view" id="view-list">
+      <section class="view" id="view-list" data-title="Suscripciones">
         <div class="toolbar">
-          <input type="search" id="search" placeholder="Buscar suscripción…" />
-          <select id="filter-category"></select>
-          <select id="sort">
-            <option value="next">Próxima renovación</option>
-            <option value="price">Precio mensual</option>
-            <option value="name">Nombre</option>
-          </select>
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+            <input type="search" id="search" placeholder="Buscar" aria-label="Buscar suscripción" />
+          </label>
+          <div class="toolbar-row">
+            <select id="filter-category" aria-label="Filtrar por categoría"></select>
+            <select id="sort" aria-label="Ordenar">
+              <option value="next">Próxima renovación</option>
+              <option value="price">Precio mensual</option>
+              <option value="name">Nombre</option>
+            </select>
+          </div>
         </div>
         <div class="sub-list" id="sub-list"></div>
       </section>
 
       <!-- Calendario mensual -->
-      <section class="view" id="view-calendar">
-        <div class="cal-header">
-          <button class="btn" id="cal-prev" type="button" aria-label="Mes anterior">‹</button>
-          <h2 id="cal-title"></h2>
-          <button class="btn" id="cal-next" type="button" aria-label="Mes siguiente">›</button>
-          <button class="btn" id="cal-today" type="button">Hoy</button>
+      <section class="view" id="view-calendar" data-title="Calendario">
+        <div class="card cal-card">
+          <div class="cal-header">
+            <button class="icon-btn" id="cal-prev" type="button" aria-label="Mes anterior">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
+            </button>
+            <div class="cal-heading">
+              <h2 id="cal-title"></h2>
+              <p id="cal-total"></p>
+            </div>
+            <button class="icon-btn" id="cal-next" type="button" aria-label="Mes siguiente">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+            </button>
+          </div>
+          <div class="calendar" id="calendar"></div>
+          <button class="btn small ghost" id="cal-today" type="button">Volver a hoy</button>
         </div>
-        <p class="cal-total" id="cal-total"></p>
-        <div class="calendar" id="calendar"></div>
-        <ul class="charges" id="cal-day-detail"></ul>
+        <section class="group">
+          <h2 class="group-title" id="cal-day-title">Toca un día para ver sus cobros</h2>
+          <ul class="list" id="cal-day-detail"></ul>
+        </section>
       </section>
 
       <!-- Ajustes -->
-      <section class="view" id="view-settings">
-        <div class="card">
-          <h3>Moneda</h3>
-          <select id="currency">
-            <option value="EUR">Euro (€)</option>
-            <option value="USD">Dólar ($)</option>
-            <option value="GBP">Libra (£)</option>
-            <option value="MXN">Peso mexicano</option>
-            <option value="ARS">Peso argentino</option>
-            <option value="COP">Peso colombiano</option>
-            <option value="CLP">Peso chileno</option>
-          </select>
-        </div>
-        <div class="card">
-          <h3>Recordatorios</h3>
-          <p>
-            Las notificaciones del navegador avisan mientras la app esté abierta (o instalada en
-            segundo plano). Para avisos garantizados con la app cerrada, exporta tus suscripciones
-            al calendario del móvil: cada una incluye su alarma.
-          </p>
-          <div class="row">
-            <button class="btn" id="notify-btn" type="button">Activar notificaciones</button>
-            <button class="btn" id="ics-btn" type="button">Exportar a calendario (.ics)</button>
+      <section class="view" id="view-settings" data-title="Ajustes">
+        <section class="group" data-pwa id="install-group" hidden>
+          <h2 class="group-title">Instalar en el móvil</h2>
+          <div class="card install-card">
+            <img src="icons/icon-192.png" alt="" width="56" height="56" loading="lazy" />
+            <div class="grow">
+              <strong>Tenla en tu pantalla de inicio</strong>
+              <p class="muted" id="install-help">Se abre a pantalla completa y funciona sin conexión.</p>
+            </div>
+            <button class="btn primary" id="install-btn" type="button" hidden>Instalar</button>
           </div>
-          <p class="muted" id="notify-status"></p>
-        </div>
-        <div class="card">
-          <h3>Copia de seguridad</h3>
-          <p>Tus datos se guardan solo en este dispositivo.</p>
-          <div class="row">
-            <button class="btn" id="export-btn" type="button">Exportar JSON</button>
-            <label class="btn">
-              Importar JSON
-              <input type="file" id="import-input" accept="application/json" hidden />
-            </label>
-            <button class="btn" id="demo-btn" type="button">Cargar ejemplos</button>
-            <button class="btn danger" id="clear-btn" type="button">Borrar todo</button>
-          </div>
-        </div>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title">General</h2>
+          <ul class="list settings">
+            <li>
+              <label for="currency" class="grow">Moneda</label>
+              <select id="currency">
+                <option value="EUR">Euro (€)</option>
+                <option value="USD">Dólar ($)</option>
+                <option value="GBP">Libra (£)</option>
+                <option value="MXN">Peso mexicano</option>
+                <option value="ARS">Peso argentino</option>
+                <option value="COP">Peso colombiano</option>
+                <option value="CLP">Peso chileno</option>
+              </select>
+            </li>
+          </ul>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title">Recordatorios</h2>
+          <ul class="list settings">
+            <li data-pwa>
+              <div class="grow">
+                <span>Notificaciones</span>
+                <small id="notify-status"></small>
+              </div>
+              <button class="btn small" id="notify-btn" type="button">Activar</button>
+            </li>
+            <li data-pwa>
+              <div class="grow">
+                <span>Añadir al calendario</span>
+                <small>Avisos con alarma aunque la app esté cerrada</small>
+              </div>
+              <button class="btn small" id="ics-btn" type="button">Exportar</button>
+            </li>
+            <li>
+              <div class="grow">
+                <span>Avisos dentro de la app</span>
+                <small>Cada suscripción tiene sus días de aviso; las renovaciones cercanas salen arriba en Resumen.</small>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title">Datos</h2>
+          <ul class="list settings">
+            <li id="export-row">
+              <span class="grow">Exportar copia (JSON)</span>
+              <button class="btn small" id="export-btn" type="button">Exportar</button>
+            </li>
+            <li>
+              <span class="grow">Importar copia</span>
+              <label class="btn small">
+                Elegir archivo
+                <input type="file" id="import-input" accept="application/json,.json" hidden />
+              </label>
+            </li>
+            <li>
+              <span class="grow">Añadir ejemplos</span>
+              <button class="btn small" id="demo-btn" type="button">Añadir</button>
+            </li>
+            <li>
+              <span class="grow danger-text">Borrar todas las suscripciones</span>
+              <button class="btn small danger" id="clear-btn" type="button">Borrar</button>
+            </li>
+          </ul>
+          <p class="footnote" id="storage-note">Tus datos se guardan solo en este dispositivo.</p>
+        </section>
       </section>
     </main>
 
-    <!-- Formulario alta / edición -->
-    <dialog id="sub-dialog">
+    <nav class="tabbar" aria-label="Secciones">
+      <button class="tab active" data-view="dashboard" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z" /></svg>
+        <span>Resumen</span>
+      </button>
+      <button class="tab" data-view="list" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3" /><path d="M3.5 9.5h17M7 15h4" /></svg>
+        <span>Suscripciones</span>
+      </button>
+      <button class="tab" data-view="calendar" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14.5" rx="3" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></svg>
+        <span>Calendario</span>
+      </button>
+      <button class="tab" data-view="settings" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6" /></svg>
+        <span>Ajustes</span>
+      </button>
+    </nav>
+
+    <!-- Formulario alta / edición (hoja inferior en el móvil) -->
+    <dialog id="sub-dialog" class="sheet">
       <form id="sub-form" method="dialog">
-        <h2 id="form-title">Nueva suscripción</h2>
-        <input type="hidden" name="id" />
-        <label>Nombre de la plataforma o app
-          <input name="name" required maxlength="60" placeholder="Netflix, Spotify, iCloud…" />
-        </label>
-        <label>¿Qué es? / Descripción
-          <textarea name="description" rows="2" maxlength="300" placeholder="Plan Premium 4K compartido con familia"></textarea>
-        </label>
-        <div class="form-row">
-          <label>Precio
-            <input name="price" type="number" step="0.01" min="0" required />
+        <div class="sheet-head">
+          <button class="link-btn" value="cancel" formnovalidate type="submit">Cancelar</button>
+          <h2 id="form-title">Nueva suscripción</h2>
+          <button class="link-btn strong" value="save" type="submit">Guardar</button>
+        </div>
+        <input type="hidden" name="id" id="f-id" />
+        <div class="field-group">
+          <label class="field"><span>Nombre</span>
+            <input name="name" id="f-name" required maxlength="60" placeholder="Netflix, Spotify, iCloud…" autocomplete="off" />
           </label>
-          <label>Periodicidad
-            <select name="cycle">
-              <option value="monthly">Mensual</option>
-              <option value="weekly">Semanal</option>
-              <option value="quarterly">Trimestral</option>
-              <option value="semiannual">Semestral</option>
-              <option value="yearly">Anual</option>
+          <label class="field"><span>Qué es</span>
+            <textarea name="description" id="f-description" rows="2" maxlength="300" placeholder="Plan Premium compartido con la familia"></textarea>
+          </label>
+        </div>
+        <div class="field-group">
+          <label class="field inline"><span>Precio</span>
+            <input name="price" id="f-price" type="number" inputmode="decimal" step="0.01" min="0" required placeholder="0,00" />
+          </label>
+          <label class="field inline"><span>Se cobra</span>
+            <select name="cycle" id="f-cycle">
+              <option value="monthly">Cada mes</option>
+              <option value="weekly">Cada semana</option>
+              <option value="quarterly">Cada 3 meses</option>
+              <option value="semiannual">Cada 6 meses</option>
+              <option value="yearly">Cada año</option>
             </select>
           </label>
-        </div>
-        <div class="form-row">
-          <label>Fecha del primer cobro / renovación
-            <input name="startDate" type="date" required />
+          <label class="field inline"><span>Primer cobro</span>
+            <input name="startDate" id="f-startDate" type="date" required />
           </label>
-          <label>Avisarme (días antes)
-            <input name="reminderDays" type="number" min="0" max="60" value="3" />
+          <label class="field inline"><span>Avisarme</span>
+            <span class="suffix"><input name="reminderDays" id="f-reminderDays" type="number" inputmode="numeric" min="0" max="60" value="3" /> días antes</span>
           </label>
         </div>
-        <div class="form-row">
-          <label>Categoría
-            <input name="category" list="category-options" placeholder="Streaming" />
+        <div class="field-group">
+          <label class="field inline"><span>Categoría</span>
+            <input name="category" id="f-category" list="category-options" placeholder="Streaming" autocomplete="off" />
             <datalist id="category-options"></datalist>
           </label>
-          <label>Método de pago
-            <input name="paymentMethod" placeholder="Visa ****1234" />
+          <label class="field inline"><span>Pago</span>
+            <input name="paymentMethod" id="f-paymentMethod" placeholder="Visa ····1234" autocomplete="off" />
+          </label>
+          <label class="field inline"><span>Web</span>
+            <input name="url" id="f-url" type="url" inputmode="url" placeholder="https://…" autocomplete="off" />
           </label>
         </div>
-        <div class="form-row">
-          <label>Web para gestionar / cancelar
-            <input name="url" type="url" placeholder="https://…" />
+        <div class="field-group">
+          <div class="field inline"><span>Color</span>
+            <div class="swatches" id="swatches" role="radiogroup" aria-label="Color"></div>
+            <input name="color" id="f-color" type="hidden" />
+          </div>
+          <label class="field inline"><span>Activa</span>
+            <input name="active" id="f-active" type="checkbox" class="switch" checked />
           </label>
-          <label>Color
-            <input name="color" type="color" value="#4f46e5" />
-          </label>
-        </div>
-        <div class="form-row">
-          <label>Fecha de baja (opcional)
-            <input name="endDate" type="date" />
-          </label>
-          <label class="check">
-            <input name="active" type="checkbox" checked /> Activa
+          <label class="field inline"><span>Fecha de baja</span>
+            <input name="endDate" id="f-endDate" type="date" />
           </label>
         </div>
-        <div class="dialog-actions">
-          <button class="btn danger" id="delete-btn" type="button">Eliminar</button>
-          <span class="spacer"></span>
-          <button class="btn" value="cancel" formnovalidate type="submit">Cancelar</button>
-          <button class="btn primary" value="save" type="submit">Guardar</button>
+        <button class="btn danger block" id="delete-btn" type="button">Eliminar suscripción</button>
+      </form>
+    </dialog>
+
+    <dialog id="confirm-dialog" class="alert">
+      <form method="dialog">
+        <p id="confirm-text"></p>
+        <div class="alert-actions">
+          <button class="link-btn" value="cancel" type="submit">Cancelar</button>
+          <button class="link-btn danger-text strong" value="ok" id="confirm-ok" type="submit">Aceptar</button>
         </div>
       </form>
     </dialog>
 
-    <div class="toast" id="toast" role="status"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <!-- PAGE-END -->
 
     <script src="schedule.js"></script>
     <script src="ics.js"></script>
+    <script src="store.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
