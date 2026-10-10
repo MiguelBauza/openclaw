@@ -47,6 +47,31 @@ Para instalarla necesita servirse por HTTPS. El workflow
    - iPhone (Safari): **Compartir → Añadir a pantalla de inicio**.
    - Android (Chrome): **Ajustes → Instalar** dentro de la app, o el menú ⋮ → Instalar app.
 
+## Sincronizar con Supabase (app instalada)
+
+Con Supabase tus suscripciones se guardan en tu cuenta y se ven igual en todos tus
+dispositivos. Se entra con un código que llega por email (sin contraseña) y los cambios
+hechos sin conexión se suben cuando vuelve la red. El cliente (`supabase.js`) usa la API
+REST de Supabase directamente, sin librerías externas.
+
+1. Crea un proyecto gratuito en [supabase.com](https://supabase.com).
+2. **SQL Editor → New query**: pega `supabase/schema.sql` y pulsa **Run**. Crea la tabla
+   `subscriptions` con seguridad por filas: cada usuario solo puede ver y cambiar sus filas.
+3. **Authentication → Emails → Templates**: en las plantillas **Magic Link** y **Confirm
+   signup**, añade el código al cuerpo del email, por ejemplo:
+   `<p>Tu código: <strong>{{ .Token }}</strong></p>`
+   (por defecto Supabase envía solo un enlace; la app necesita el código para que el inicio
+   de sesión funcione dentro de la app instalada en el iPhone).
+4. **Project Settings → API**: copia la **Project URL** y la clave pública (**anon** o
+   **publishable**). Nunca uses la clave `service_role` / `secret`.
+5. Pon esos dos valores en `config.js` (para que todos tus dispositivos los tengan) o pégalos
+   en la app en **Ajustes → Cuenta en la nube**.
+6. En la app: **Ajustes → Cuenta en la nube**, escribe tu email, introduce el código y listo.
+   Lo que ya tenías en el dispositivo se sube a tu cuenta la primera vez.
+
+El servidor de email incluido en Supabase solo envía unos pocos emails por hora; si
+necesitas más, configura tu propio SMTP en **Authentication → Emails → SMTP Settings**.
+
 ## Versión publicada en Claude
 
 `store.js` detecta si la página se abre dentro del visor de artefactos de Claude y, en ese

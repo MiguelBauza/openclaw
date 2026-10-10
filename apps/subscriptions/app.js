@@ -40,16 +40,26 @@
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+  let cloudUI = null;
+  const STORAGE_NOTES = {
+    claude: "Tus suscripciones se guardan en tu cuenta de Claude y solo tú las ves.",
+    cloud:
+      "Tus suscripciones se guardan en tu cuenta en la nube y se sincronizan entre dispositivos.",
+    local: "Tus datos se guardan solo en este dispositivo.",
+  };
   const store = window.SubStore.createStore({
     onChange: () => renderAll(),
     onStatus: (text) => {
       const node = $("#sync-status");
       node.textContent = text;
       node.hidden = !text;
-      if (text) {
-        $("#storage-note").textContent =
-          "Tus suscripciones se guardan en tu cuenta de Claude y solo tú las ves.";
+      $("#storage-note").textContent = STORAGE_NOTES[store.mode()];
+    },
+    onCloud: () => {
+      if (cloudUI) {
+        cloudUI.render();
       }
+      $("#storage-note").textContent = STORAGE_NOTES[store.mode()];
     },
   });
   const subs = () => store.state.subs;
@@ -905,6 +915,7 @@
   function renderAll() {
     $("#currency").value = settings.currency;
     $("#export-row").hidden = !store.canDownload();
+    $("#storage-note").textContent = STORAGE_NOTES[store.mode()];
     renderClock();
     renderCategoryOptions();
     renderDashboard();
@@ -950,6 +961,7 @@
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
   setupInstall();
+  cloudUI = window.SubCloudUI ? window.SubCloudUI.mount({ store, toast }) : null;
 
   // Home-screen shortcut "Añadir suscripción" opens ./?add
   const params = new URLSearchParams(location.search);

@@ -1190,6 +1190,59 @@ input.switch:checked::after {
   border-left: 0.5px solid var(--hairline);
 }
 
+/* ---------- Cloud account ---------- */
+.cloud-card,
+.cloud-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cloud-card p {
+  font-size: 0.9rem;
+}
+.stack-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.stack-field input {
+  color: var(--text);
+  font-weight: 400;
+}
+#sb-code {
+  font-size: 1.4rem;
+  letter-spacing: 0.3em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+#sb-reset {
+  align-self: center;
+}
+.cloud-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cloud-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--paid-a), var(--paid-b));
+  box-shadow: 0 0 0 4px var(--paid-bg);
+  flex-shrink: 0;
+}
+.cloud-dot.busy {
+  background: var(--soon);
+  box-shadow: 0 0 0 4px var(--soon-bg);
+}
+.cloud-dot.off {
+  background: var(--muted);
+  box-shadow: 0 0 0 4px var(--fill);
+}
+
 /* ---------- Install card ---------- */
 .install-card {
   display: flex;

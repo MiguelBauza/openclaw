@@ -35,7 +35,7 @@ jobs:
       - name: Prepare site
         run: |
           mkdir -p _site
-          cp -r apps/subscriptions/{index.html,styles.css,schedule.js,ics.js,store.js,app.js,sw.js,manifest.webmanifest,icons} _site/
+          cp -r apps/subscriptions/{index.html,styles.css,schedule.js,ics.js,config.js,supabase.js,store.js,cloud-ui.js,app.js,sw.js,manifest.webmanifest,icons} _site/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

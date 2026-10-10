@@ -1,6 +1,7 @@
-// Persistence for the subscription manager. Always keeps a localStorage copy;
-// when the page runs inside a Claude artifact viewer it also syncs to the
-// viewer's private `db` subtree (data/users/<id>/...) so data follows the account.
+// Persistence for the subscription manager. Always keeps a localStorage copy, plus:
+// - inside a Claude artifact viewer: syncs to the viewer's private `db` subtree;
+// - elsewhere (installed PWA), when Supabase is configured: queues every change and
+//   syncs it to the user's rows (see supabase.js), so data follows the account.
 // Exposes `globalThis.SubStore`.
 (function (root) {
   "use strict";
@@ -8,6 +9,9 @@
   const SUBS_KEY = "subs.v1";
   const SETTINGS_KEY = "subs.settings.v1";
   const SYNCED_KEY = "subs.synced.v1";
+  const PENDING_KEY = "subs.cloud.pending.v1";
+  const MERGED_KEY = "subs.cloud.merged.v1";
+  const SETTINGS_ROW = "__settings";
 
   function load(key, fallback) {
     try {
@@ -32,12 +36,122 @@
   function createStore(handlers) {
     const onChange = handlers.onChange || (() => {});
     const onStatus = handlers.onStatus || (() => {});
+    const onCloud = handlers.onCloud || (() => {});
     const state = {
       subs: load(SUBS_KEY, []),
       settings: Object.assign({ currency: "EUR" }, load(SETTINGS_KEY, {})),
     };
     let remote = null;
     let downloads = null;
+
+    // ---- Supabase sync (installed app) ----
+    const cloud = () =>
+      !hasClaude() && root.SubCloud && root.SubCloud.isConfigured() ? root.SubCloud : null;
+    let pending = load(PENDING_KEY, []);
+    const sync = { running: false, again: false, timer: null, last: null, error: "" };
+
+    // Latest op per id wins; ops are flushed in order on the next sync.
+    function queue(op) {
+      if (!cloud()) {
+        return;
+      }
+      pending = pending.filter((p) => p.id !== op.id);
+      pending.push(op);
+      save(PENDING_KEY, pending);
+      clearTimeout(sync.timer);
+      sync.timer = setTimeout(() => syncCloud(), 400);
+    }
+
+    async function syncCloud() {
+      const c = cloud();
+      if (!c || !c.isSignedIn()) {
+        onCloud();
+        return;
+      }
+      if (sync.running) {
+        sync.again = true;
+        return;
+      }
+      sync.running = true;
+      onCloud();
+      try {
+        while (pending.length) {
+          const batch = pending.slice();
+          await c.upsertRows(batch.filter((p) => p.op === "upsert"));
+          for (const op of batch.filter((p) => p.op === "delete")) {
+            await c.deleteRow(op.id);
+          }
+          // Keep ops queued while this batch was in flight (they are new objects).
+          pending = pending.filter((p) => !batch.includes(p));
+          save(PENDING_KEY, pending);
+        }
+        const rows = await c.fetchRows();
+        // First sync of this account on this device: upload local items it lacks.
+        const email = c.userEmail();
+        if (load(MERGED_KEY, "") !== email) {
+          const ids = new Set(rows.map((r) => r.id));
+          const missing = state.subs
+            .filter((s) => !ids.has(s.id))
+            .map((s) => ({ id: s.id, data: s }));
+          if (!ids.has(SETTINGS_ROW)) {
+            missing.push({ id: SETTINGS_ROW, data: state.settings });
+          }
+          await c.upsertRows(missing);
+          rows.push(...missing);
+          save(MERGED_KEY, email);
+        }
+        if (pending.length) {
+          sync.again = true; // edited during the fetch; pull again after flushing
+        } else {
+          state.subs = rows.filter((r) => r.id !== SETTINGS_ROW).map((r) => r.data);
+          const st = rows.find((r) => r.id === SETTINGS_ROW);
+          if (st && st.data && st.data.currency) {
+            state.settings.currency = st.data.currency;
+          }
+          persistLocal();
+          onChange();
+        }
+        sync.last = new Date();
+        sync.error = "";
+        onStatus("");
+      } catch (err) {
+        sync.error = err && err.message ? err.message : "Error de red";
+        onStatus(
+          c.isSignedIn()
+            ? "Sin conexión con la nube: los cambios se subirán cuando vuelva la red."
+            : "Tu sesión en la nube ha caducado. Vuelve a entrar en Ajustes.",
+        );
+      } finally {
+        sync.running = false;
+        onCloud();
+        if (sync.again) {
+          sync.again = false;
+          clearTimeout(sync.timer);
+          sync.timer = setTimeout(() => syncCloud(), 400);
+        }
+      }
+    }
+
+    function cloudState() {
+      const c = root.SubCloud;
+      return {
+        available: !hasClaude() && Boolean(c),
+        configured: Boolean(cloud()),
+        signedIn: Boolean(cloud() && c.isSignedIn()),
+        email: c ? c.userEmail() : "",
+        syncing: sync.running,
+        last: sync.last,
+        error: sync.error,
+        pending: pending.length,
+      };
+    }
+
+    function mode() {
+      if (remote) {
+        return "claude";
+      }
+      return cloud() && root.SubCloud.isSignedIn() ? "cloud" : "local";
+    }
 
     const persistLocal = () => {
       save(SUBS_KEY, state.subs);
@@ -62,6 +176,7 @@
       if (remote) {
         pushSub(sub);
       }
+      queue({ op: "upsert", id: sub.id, data: sub });
       return idx < 0;
     }
 
@@ -71,12 +186,16 @@
       if (remote) {
         subDoc(id).delete().catch(fail);
       }
+      queue({ op: "delete", id });
     }
 
     async function replaceAll(list) {
       const previous = state.subs;
       state.subs = list.slice();
       persistLocal();
+      const keepIds = new Set(list.map((s) => s.id));
+      previous.filter((s) => !keepIds.has(s.id)).forEach((s) => queue({ op: "delete", id: s.id }));
+      list.forEach((s) => queue({ op: "upsert", id: s.id, data: s }));
       if (!remote) {
         return;
       }
@@ -94,6 +213,7 @@
     function saveSettings(patch) {
       Object.assign(state.settings, patch);
       persistLocal();
+      queue({ op: "upsert", id: SETTINGS_ROW, data: Object.assign({}, state.settings) });
       if (remote) {
         remote
           .doc("settings")
@@ -104,7 +224,20 @@
 
     async function connect() {
       if (!hasClaude()) {
-        onStatus("");
+        // Installed app: sync now, when the app comes back to the foreground,
+        // when the network returns, and every minute while visible.
+        syncCloud();
+        document.addEventListener("visibilitychange", () => {
+          if (!document.hidden) {
+            syncCloud();
+          }
+        });
+        window.addEventListener("online", () => syncCloud());
+        setInterval(() => {
+          if (!document.hidden) {
+            syncCloud();
+          }
+        }, 60_000);
         return;
       }
       root.claude.use("downloads").then((d) => {
@@ -181,6 +314,9 @@
       replaceAll,
       saveSettings,
       connect,
+      syncCloud,
+      cloudState,
+      mode,
       canDownload,
       download,
       load,

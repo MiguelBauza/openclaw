@@ -172,6 +172,51 @@
           </div>
         </section>
 
+        <section class="group" data-pwa id="cloud-group">
+          <h2 class="group-title">Cuenta en la nube</h2>
+          <div class="card cloud-card">
+            <form id="cloud-setup" class="cloud-step" hidden>
+              <p class="muted">Conecta tu proyecto de Supabase para guardar tus suscripciones en tu cuenta y verlas igual en todos tus dispositivos.</p>
+              <label class="stack-field" for="sb-url"><span>URL del proyecto</span>
+                <input id="sb-url" type="url" inputmode="url" placeholder="https://tu-proyecto.supabase.co" autocomplete="off" required />
+              </label>
+              <label class="stack-field" for="sb-key"><span>Clave pública (anon o publishable)</span>
+                <input id="sb-key" placeholder="eyJ… o sb_publishable_…" autocomplete="off" spellcheck="false" required />
+              </label>
+              <button class="btn primary block" type="submit">Conectar proyecto</button>
+            </form>
+
+            <form id="cloud-login" class="cloud-step" hidden>
+              <p class="muted">Entra con tu email. Te llegará un código de un solo uso; no hace falta contraseña.</p>
+              <label class="stack-field" for="sb-email"><span>Email</span>
+                <input id="sb-email" type="email" autocomplete="email" placeholder="tu@email.com" required />
+              </label>
+              <button class="btn primary block" id="sb-send" type="submit">Enviarme el código</button>
+              <div class="cloud-step" id="sb-code-row" hidden>
+                <label class="stack-field" for="sb-code"><span>Código del email</span>
+                  <input id="sb-code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" />
+                </label>
+                <button class="btn primary block" id="sb-verify" type="button">Entrar</button>
+              </div>
+              <button class="btn small ghost" id="sb-reset" type="button">Cambiar de proyecto</button>
+            </form>
+
+            <div id="cloud-account" class="cloud-step" hidden>
+              <div class="cloud-row">
+                <span class="cloud-dot" id="sb-dot"></span>
+                <div class="grow">
+                  <strong id="sb-user"></strong>
+                  <small id="sb-sync"></small>
+                </div>
+              </div>
+              <div class="row">
+                <button class="btn small" id="sb-sync-now" type="button">Sincronizar ahora</button>
+                <button class="btn small danger" id="sb-logout" type="button">Cerrar sesión</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="group">
           <h2 class="group-title">General</h2>
           <ul class="list settings">
@@ -343,7 +388,10 @@
 
     <script src="schedule.js"></script>
     <script src="ics.js"></script>
+    <script src="config.js"></script>
+    <script src="supabase.js"></script>
     <script src="store.js"></script>
+    <script src="cloud-ui.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

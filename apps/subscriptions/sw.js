@@ -1,13 +1,16 @@
 // Offline support: app shell is precached and served cache-first, then refreshed
 // in the background (stale-while-revalidate) so updates land on the next launch.
-const CACHE = "subs-v2";
+const CACHE = "subs-v3";
 const SHELL = [
   "./",
   "index.html",
   "styles.css",
   "schedule.js",
   "ics.js",
+  "config.js",
+  "supabase.js",
   "store.js",
+  "cloud-ui.js",
   "app.js",
   "manifest.webmanifest",
   "icons/icon.svg",
