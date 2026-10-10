@@ -110,6 +110,10 @@
       - any-glob-to-any-file:
           - "apps/ios/**"
           - "docs/platforms/ios.md"
+"app: subscriptions":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/subscriptions/**"
 "app: macos":
   - changed-files:
       - any-glob-to-any-file:
